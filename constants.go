@@ -1,4 +1,4 @@
-package jito_go
+package jito
 
 import (
 	"github.com/gagliardetto/solana-go"
@@ -33,20 +33,6 @@ var TestnetTipAccounts = []solana.PublicKey{
 	solana.MustPublicKeyFromBase58("9n3d1K5YD2vECAbRFhFFGYNNjiXtHXJWn9F31t89vsAV"),
 	solana.MustPublicKeyFromBase58("9ttgPBBhRYFuQccdR1DSnb7hydsWANoDsV3P9kaGMCEh"),
 }
-
-type Region string
-
-func (r Region) String() string {
-	return string(r)
-}
-
-var (
-	AmsterdamRegion    Region = "amsterdam"
-	FrankfurtRegion    Region = "frankfurt"
-	NewYorkRegion      Region = "ny"
-	SaltLakeCityRegion Region = "slc"
-	TokyoRegion        Region = "tokyo"
-)
 
 type JitoEndpointInfo struct {
 	Region            string

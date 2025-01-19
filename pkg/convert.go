@@ -1,11 +1,10 @@
 package pkg
 
 import (
-	"encoding/base64"
+	jito_pb "github.com/weeaa/jito-go/pb"
+
 	bin "github.com/gagliardetto/binary"
 	"github.com/gagliardetto/solana-go"
-	"github.com/mr-tron/base58"
-	"github.com/weeaa/jito-go/pb"
 )
 
 // ConvertTransactionToProtobufPacket converts a solana-go Transaction to a pb.Packet.
@@ -65,32 +64,6 @@ func ConvertBatchProtobufPacketToTransaction(packets []*jito_pb.Packet) ([]*sola
 		txs = append(txs, tx)
 	}
 
-	return txs, nil
-}
-
-// ConvertBachTransactionsToBase58 converts a slice of solana.Transaction to a base58 string encoded transaction.
-func ConvertBachTransactionsToBase58(transactions []*solana.Transaction) ([]string, error) {
-	txs := make([]string, len(transactions))
-	for i, tx := range transactions {
-		txBytes, err := tx.MarshalBinary()
-		if err != nil {
-			return nil, err
-		}
-		txs[i] = base58.Encode(txBytes)
-	}
-	return txs, nil
-}
-
-// ConvertBachTransactionsToBase64 converts a slice of solana.Transaction to a base64 string encoded transaction.
-func ConvertBachTransactionsToBase64(transactions []*solana.Transaction) ([]string, error) {
-	txs := make([]string, len(transactions))
-	for i, tx := range transactions {
-		txBytes, err := tx.MarshalBinary()
-		if err != nil {
-			return nil, err
-		}
-		txs[i] = base64.StdEncoding.EncodeToString(txBytes)
-	}
 	return txs, nil
 }
 

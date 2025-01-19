@@ -1,8 +1,9 @@
 package relayer_client
 
 import (
-	"github.com/weeaa/jito-go/pb"
+	jito_pb "github.com/weeaa/jito-go/pb"
 	"github.com/weeaa/jito-go/pkg"
+
 	"google.golang.org/grpc"
 )
 

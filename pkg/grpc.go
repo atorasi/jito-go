@@ -2,10 +2,18 @@ package pkg
 
 import (
 	"context"
+	"time"
+
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/connectivity"
-	"time"
+	"google.golang.org/grpc/keepalive"
 )
+
+var ka = keepalive.ClientParameters{
+	Time:                10 * time.Second, // send ping every 10 seconds
+	Timeout:             5 * time.Second,  // wait 5 seconds for ping ack
+	PermitWithoutStream: true,             // send ping even without active streams
+}
 
 // CreateAndObserveGRPCConn creates a new gRPC connection and observes its conn status.
 func CreateAndObserveGRPCConn(ctx context.Context, chErr chan error, target string, opts ...grpc.DialOption) (*grpc.ClientConn, error) {
@@ -13,7 +21,7 @@ func CreateAndObserveGRPCConn(ctx context.Context, chErr chan error, target stri
 	if err != nil {
 		return nil, err
 	}
-	
+
 	go func() {
 		var retries int
 		for {
@@ -30,7 +38,7 @@ func CreateAndObserveGRPCConn(ctx context.Context, chErr chan error, target stri
 					time.Sleep(1 * time.Second)
 					continue
 				}
-				
+
 				if state == connectivity.TransientFailure || state == connectivity.Connecting || state == connectivity.Idle {
 					if retries < 5 {
 						time.Sleep(time.Duration(retries) * time.Second)
@@ -51,13 +59,13 @@ func CreateAndObserveGRPCConn(ctx context.Context, chErr chan error, target stri
 					}
 					retries = 0
 				}
-				
+
 				if !conn.WaitForStateChange(ctx, state) {
 					continue
 				}
 			}
 		}
 	}()
-	
+
 	return conn, nil
 }

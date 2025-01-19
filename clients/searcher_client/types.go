@@ -1,25 +1,16 @@
 package searcher_client
 
 import (
-	"github.com/gagliardetto/solana-go/rpc"
-	"github.com/weeaa/jito-go/pb"
-	"github.com/weeaa/jito-go/pkg"
-	"google.golang.org/grpc"
 	"math/big"
 	"net/http"
 	"net/url"
+
+	jito_pb "github.com/weeaa/jito-go/pb"
+	"github.com/weeaa/jito-go/pkg"
+
+	"github.com/gagliardetto/solana-go/rpc"
+	"google.golang.org/grpc"
 )
-
-type Encoding string
-
-var (
-	Base64 Encoding
-	Base58 Encoding
-)
-
-func (e Encoding) String() string {
-	return string(e)
-}
 
 var DefaultHeader = http.Header{
 	"Content-Type": {"application/json"},

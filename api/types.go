@@ -1,7 +1,6 @@
 package api
 
 import (
-	"net/http"
 	"time"
 )
 
@@ -9,18 +8,6 @@ var (
 	baseApi = "explorer.jito.wtf"
 
 	recentBundlesPath = "/wtfrest/api/v1/bundles/recent"
-
-	headers = http.Header{
-		"Referer":    {"https://explorer.jito.wtf/"},
-		"User-Agent": {"jito-golang :)"},
-	}
-)
-
-type Sort string
-
-var (
-	Time Sort = "Time"
-	Tip  Sort = "Tip"
 )
 
 type Timeframe string
@@ -38,16 +25,4 @@ type RecentBundlesResponse []struct {
 	Tippers           []string  `json:"tippers"`
 	Transactions      []string  `json:"transactions"`
 	LandedTipLamports int       `json:"landedTipLamports"`
-}
-
-type GetBundleInfoResponse struct {
-	BundleId          string    `json:"bundleId"`
-	Slot              int       `json:"slot"`
-	Validator         string    `json:"validator"`
-	Tippers           []string  `json:"tippers"`
-	LandedTipLamports int64     `json:"landedTipLamports"`
-	LandedCu          int       `json:"landedCu"`
-	BlockIndex        int       `json:"blockIndex"`
-	Timestamp         time.Time `json:"timestamp"`
-	TxSignatures      []string  `json:"txSignatures"`
 }

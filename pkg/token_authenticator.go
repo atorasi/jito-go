@@ -3,13 +3,15 @@ package pkg
 import (
 	"context"
 	"fmt"
-	"github.com/gagliardetto/solana-go"
-	"github.com/mr-tron/base58"
-	"github.com/weeaa/jito-go/pb"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/metadata"
 	"sync"
 	"time"
+
+	jito_pb "github.com/weeaa/jito-go/pb"
+
+	"github.com/gagliardetto/solana-go"
+	"github.com/mr-tron/base58"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/metadata"
 )
 
 type AuthenticationService struct {

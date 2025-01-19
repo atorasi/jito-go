@@ -1,30 +1,26 @@
 package searcher_client
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"crypto/tls"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"math/rand"
+	"net/http"
+	"net/url"
+	"time"
+
+	jito_pb "github.com/weeaa/jito-go/pb"
+	"github.com/weeaa/jito-go/pkg"
+
 	"github.com/gagliardetto/solana-go"
 	"github.com/gagliardetto/solana-go/programs/system"
 	"github.com/gagliardetto/solana-go/rpc"
-	"github.com/weeaa/jito-go/pb"
-	"github.com/weeaa/jito-go/pkg"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
-	"google.golang.org/grpc/keepalive"
-	"io"
-	"math/rand"
-	"net"
-	"net/http"
-	"net/url"
-	"strings"
-	"sync"
-	"time"
 )
 
 // New creates a new Searcher Client instance.
@@ -73,12 +69,10 @@ func New(
 }
 
 // NewNoAuth initializes and returns a new instance of the Searcher Client which does not require private key signing.
-// Proxy feature allows you to have different Jito clients running on the same machine without hitting rate limits due to IP limits.
 func NewNoAuth(
 	ctx context.Context,
 	grpcDialURL string,
 	jitoRpcClient, rpcClient *rpc.Client,
-	proxyURL string,
 	tlsConfig *tls.Config,
 	opts ...grpc.DialOption,
 ) (
@@ -87,22 +81,6 @@ func NewNoAuth(
 		opts = append(opts, grpc.WithTransportCredentials(credentials.NewTLS(tlsConfig)))
 	} else {
 		opts = append(opts, grpc.WithTransportCredentials(credentials.NewTLS(&tls.Config{})))
-	}
-
-	if proxyURL != "" {
-		dialer, err := createContextDialer(proxyURL)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create proxy dialer: %w", err)
-		}
-
-		opts = append(opts,
-			grpc.WithContextDialer(dialer),
-			grpc.WithKeepaliveParams(keepalive.ClientParameters{
-				Time:                15 * time.Second,
-				Timeout:             5 * time.Second,
-				PermitWithoutStream: true,
-			}),
-		)
 	}
 
 	chErr := make(chan error)
@@ -126,88 +104,6 @@ func NewNoAuth(
 		ErrChan:                  chErr,
 		Auth:                     &pkg.AuthenticationService{GrpcCtx: ctx},
 	}, nil
-}
-
-func parseProxyString(proxyStr string) (host string, port string, username string, password string, err error) {
-	parts := strings.Split(proxyStr, ":")
-	if len(parts) != 4 {
-		return "", "", "", "", fmt.Errorf("invalid proxy format, expected IP:PORT:USERNAME:PASSWORD")
-	}
-	return parts[0], parts[1], parts[2], parts[3], nil
-}
-
-type proxyDialer struct {
-	proxyHost string
-	auth      string
-	timeout   time.Duration
-}
-
-func newProxyDialer(proxyStr string) (*proxyDialer, error) {
-	host, port, username, password, err := parseProxyString(proxyStr)
-	if err != nil {
-		return nil, fmt.Errorf("invalid proxy string: %w", err)
-	}
-
-	auth := base64.StdEncoding.EncodeToString([]byte(username + ":" + password))
-
-	return &proxyDialer{
-		proxyHost: net.JoinHostPort(host, port),
-		auth:      auth,
-		timeout:   30 * time.Second,
-	}, nil
-}
-
-func (d *proxyDialer) dialProxy(ctx context.Context, addr string) (net.Conn, error) {
-	var conn net.Conn
-	var err error
-
-	dialer := &net.Dialer{
-		Timeout:   d.timeout,
-		KeepAlive: 30 * time.Second,
-	}
-
-	conn, err = dialer.DialContext(ctx, "tcp", d.proxyHost)
-	if err != nil {
-		return nil, fmt.Errorf("failed to connect to proxy %s: %w", d.proxyHost, err)
-	}
-
-	connectReq := fmt.Sprintf(
-		"CONNECT %s HTTP/1.1\r\n"+
-			"Host: %s\r\n"+
-			"Proxy-Authorization: Basic %s\r\n"+
-			"User-Agent: Go-http-client/1.1\r\n"+
-			"\r\n",
-		addr, addr, d.auth,
-	)
-
-	if _, err = conn.Write([]byte(connectReq)); err != nil {
-		conn.Close()
-		return nil, fmt.Errorf("failed to write CONNECT request: %w", err)
-	}
-
-	br := bufio.NewReader(conn)
-	resp, err := http.ReadResponse(br, &http.Request{Method: "CONNECT"})
-	if err != nil {
-		conn.Close()
-		return nil, fmt.Errorf("failed to read CONNECT response: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != 200 {
-		conn.Close()
-		return nil, fmt.Errorf("proxy connection failed: %s", resp.Status)
-	}
-
-	return conn, nil
-}
-
-func createContextDialer(proxyStr string) (func(context.Context, string) (net.Conn, error), error) {
-	pd, err := newProxyDialer(proxyStr)
-	if err != nil {
-		return nil, err
-	}
-
-	return pd.dialProxy, nil
 }
 
 func (c *Client) Close() error {
@@ -356,7 +252,6 @@ func (c *Client) GetConnectedLeadersRegioned(regions []string, opts ...grpc.Call
 	return c.SearcherService.GetConnectedLeadersRegioned(c.Auth.GrpcCtx, &jito_pb.ConnectedLeadersRegionedRequest{Regions: regions}, opts...)
 }
 
-// GetTipAccounts returns Jito Tip Accounts.
 func (c *Client) GetTipAccounts(opts ...grpc.CallOption) (*jito_pb.GetTipAccountsResponse, error) {
 	return c.SearcherService.GetTipAccounts(c.Auth.GrpcCtx, &jito_pb.GetTipAccountsRequest{}, opts...)
 }
@@ -375,13 +270,13 @@ func (c *Client) GetNextScheduledLeader(regions []string, opts ...grpc.CallOptio
 	return c.SearcherService.GetNextScheduledLeader(c.Auth.GrpcCtx, &jito_pb.NextScheduledLeaderRequest{Regions: regions}, opts...)
 }
 
-// NewBundleSubscriptionResults creates a new bundle subscription stream, allowing to receive information about broadcasted bundles.
+// NewBundleSubscriptionResults creates a new bundle subscription, allowing to receive information about broadcasted bundles.
 func (c *Client) NewBundleSubscriptionResults(opts ...grpc.CallOption) (jito_pb.SearcherService_SubscribeBundleResultsClient, error) {
 	return c.SearcherService.SubscribeBundleResults(c.Auth.GrpcCtx, &jito_pb.SubscribeBundleResultsRequest{}, opts...)
 }
 
-// SendBundle sends a bundle of transaction(s) on chain through Jito.
-func (c *Client) SendBundle(transactions []*solana.Transaction, opts ...grpc.CallOption) (*jito_pb.SendBundleResponse, error) {
+// BroadcastBundle sends a bundle of transactions on chain thru Jito.
+func (c *Client) BroadcastBundle(transactions []*solana.Transaction, opts ...grpc.CallOption) (*jito_pb.SendBundleResponse, error) {
 	bundle, err := c.AssembleBundle(transactions)
 	if err != nil {
 		return nil, err
@@ -390,64 +285,21 @@ func (c *Client) SendBundle(transactions []*solana.Transaction, opts ...grpc.Cal
 	return c.SearcherService.SendBundle(c.Auth.GrpcCtx, &jito_pb.SendBundleRequest{Bundle: bundle}, opts...)
 }
 
-// SpamBundle spams SendBundle (spam being the amount of bundles sent). Beware, it uses goroutines 😉.
-func (c *Client) SpamBundle(transactions []*solana.Transaction, spam int, opts ...grpc.CallOption) ([]*jito_pb.SendBundleResponse, []error) {
-	bundles := make([]*jito_pb.SendBundleResponse, spam)
-	errs := make([]error, spam)
-	mu := sync.Mutex{}
-	for i := 0; i < spam; i++ {
-		go func() {
-			bundle, err := c.SendBundle(transactions, opts...)
-			if err != nil {
-				errs = append(errs, err)
-				return
-			}
-			mu.Lock()
-			bundles = append(bundles, bundle)
-			mu.Unlock()
-		}()
-	}
-	return bundles, errs
-}
-
-type SendBundleResponse struct {
+type BroadcastBundleResponse struct {
 	Jsonrpc string `json:"jsonrpc"`
 	Result  string `json:"result"`
 	Id      int    `json:"id"`
 }
 
-// SendBundle sends a bundle through Jito API.
-func SendBundle(client *http.Client, encoding Encoding, transactions []*solana.Transaction) (*SendBundleResponse, error) {
+// BroadcastBundle sends a bundle through Jito API.
+func BroadcastBundle(client *http.Client, transactions []string) (*BroadcastBundleResponse, error) {
 	buf := new(bytes.Buffer)
-
-	var txns []string
-	var err error
-	switch encoding {
-	case Base58:
-		txns, err = pkg.ConvertBachTransactionsToBase58(transactions)
-		if err != nil {
-			return nil, err
-		}
-		break
-	case Base64:
-		txns, err = pkg.ConvertBachTransactionsToBase64(transactions)
-		if err != nil {
-			return nil, err
-		}
-		break
-	default:
-		return nil, errors.New("unknown encoding, expected base64 or base58")
-	}
 
 	payload := map[string]any{
 		"jsonrpc": "2.0",
 		"id":      1,
 		"method":  "sendBundle",
-		"params":  [][]string{txns},
-	}
-
-	if encoding == Base64 {
-		payload["encoding"] = encoding
+		"params":  [][]string{transactions},
 	}
 
 	if err := json.NewEncoder(buf).Encode(payload); err != nil {
@@ -471,14 +323,14 @@ func SendBundle(client *http.Client, encoding Encoding, transactions []*solana.T
 		return nil, fmt.Errorf("BroadcastBundle error: unexpected response status %s", resp.Status)
 	}
 
-	var out SendBundleResponse
+	var out BroadcastBundleResponse
 	err = json.NewDecoder(resp.Body).Decode(&out)
 	return &out, err
 }
 
-// SendBundleWithConfirmation sends a bundle of transactions on chain through Jito BlockEngine and waits for its confirmation.
-func SendBundleWithConfirmation(ctx context.Context, client *http.Client, rpcConn *rpc.Client, encoding Encoding, transactions []*solana.Transaction) (*SendBundleResponse, error) {
-	bundle, err := SendBundle(client, encoding, transactions)
+// BroadcastBundleWithConfirmation sends a bundle of transactions on chain thru Jito BlockEngine and waits for its confirmation.
+func BroadcastBundleWithConfirmation(ctx context.Context, client *http.Client, rpcConn *rpc.Client, transactions []*solana.Transaction) (*BroadcastBundleResponse, error) {
+	bundle, err := BroadcastBundle(client, pkg.ConvertBachTransactionsToString(transactions))
 	if err != nil {
 		return nil, err
 	}
@@ -490,6 +342,7 @@ func SendBundleWithConfirmation(ctx context.Context, client *http.Client, rpcCon
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		default:
+
 			time.Sleep(5 * time.Second)
 
 			bundleStatuses, err := GetInflightBundleStatuses(client, []string{bundle.Result})
@@ -503,8 +356,6 @@ func SendBundleWithConfirmation(ctx context.Context, client *http.Client, rpcCon
 
 			var start = time.Now()
 			var statuses *rpc.GetSignatureStatusesResult
-
-			isRPCNil(rpcConn)
 
 			for {
 				statuses, err = rpcConn.GetSignatureStatuses(context.Background(), false, bundleSignatures...)
@@ -542,9 +393,9 @@ func SendBundleWithConfirmation(ctx context.Context, client *http.Client, rpcCon
 	}
 }
 
-// SendBundleWithConfirmation sends a bundle of transactions on chain through Jito BlockEngine and waits for its confirmation.
-func (c *Client) SendBundleWithConfirmation(ctx context.Context, transactions []*solana.Transaction, opts ...grpc.CallOption) (*jito_pb.SendBundleResponse, error) {
-	bundle, err := c.SendBundle(transactions, opts...)
+// BroadcastBundleWithConfirmation sends a bundle of transactions on chain thru Jito BlockEngine and waits for its confirmation.
+func (c *Client) BroadcastBundleWithConfirmation(ctx context.Context, transactions []*solana.Transaction, opts ...grpc.CallOption) (*jito_pb.SendBundleResponse, error) {
+	bundle, err := c.BroadcastBundle(transactions, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -569,8 +420,6 @@ func (c *Client) SendBundleWithConfirmation(ctx context.Context, transactions []
 
 			var start = time.Now()
 			var statuses *rpc.GetSignatureStatusesResult
-
-			isRPCNil(c.RpcConn)
 
 			for {
 				statuses, err = c.RpcConn.GetSignatureStatuses(ctx, false, bundleSignatures...)
@@ -642,15 +491,15 @@ func handleBundleResult[T *GetInflightBundlesStatusesResponse | *jito_pb.BundleR
 			if value.BundleId == bundleID {
 				switch value.Status {
 				case "Invalid":
-					return fmt.Errorf("bundle %d is invalid: %s", i, bundleID)
+					return fmt.Errorf("bundle %d is invalid", i)
 				case "Pending":
-					return fmt.Errorf("bundle %d is pending: %s", i, bundleID)
+					return fmt.Errorf("bundle %d is pending", i)
 				case "Failed":
-					return fmt.Errorf("bundle %d failed to land: %s", i, bundleID)
+					return fmt.Errorf("bundle %d failed to land", i)
 				case "Landed":
 					return nil
 				default:
-					return fmt.Errorf("bundle %d unknown error: %s", i, bundleID)
+					return fmt.Errorf("bundle %d unknown error", i)
 				}
 			}
 		}
@@ -901,23 +750,16 @@ func GetTipAccounts(client *http.Client) (*GetTipAccountsResponse, error) {
 // It forwards the received transaction as a regular Solana transaction via the Solana RPC method and submits it as a bundle.
 // Jito no longer provides a minimum tip for the bundle.
 // Please note that this minimum tip might not be sufficient to get the bundle through the auction, especially during high-demand periods.
-// Additionally, you need to set a priority fee and jito tip to ensure this transaction is set up correctly.
+// Additionally, you need to set a priority fee and jito tip to ensure this transaction is setup correctly.
 // Otherwise, if you set the query parameter bundleOnly=true, the transaction will only be sent out as a bundle and not as a regular transaction via RPC.
-func SendTransaction(client *http.Client, sig string, bundleOnly bool, encoding Encoding) (*TransactionResponse, error) {
+func SendTransaction(client *http.Client, sig string, bundleOnly bool) (*TransactionResponse, error) {
 	buf := new(bytes.Buffer)
-
-	params := []any{sig}
-	if encoding == Base64 {
-		params = append(params, map[string]string{
-			"encoding": encoding.String(),
-		})
-	}
 
 	payload := map[string]any{
 		"jsonrpc": "2.0",
 		"id":      1,
 		"method":  "sendTransaction",
-		"params":  params,
+		"params":  []string{sig},
 	}
 
 	if err := json.NewEncoder(buf).Encode(payload); err != nil {
@@ -973,12 +815,6 @@ func (c *Client) GenerateTipRandomAccountInstruction(tipAmount uint64, from sola
 	}
 
 	return system.NewTransferInstruction(tipAmount, from, solana.MustPublicKeyFromBase58(tipAccount)).Build(), nil
-}
-
-func isRPCNil(client *rpc.Client) {
-	if client == nil {
-		client = rpc.New(rpc.MainNetBeta_RPC)
-	}
 }
 
 type BundleRejectionError struct {

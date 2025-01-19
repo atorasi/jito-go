@@ -4,9 +4,11 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
-	"github.com/gagliardetto/solana-go"
-	"github.com/weeaa/jito-go/pb"
+
+	jito_pb "github.com/weeaa/jito-go/pb"
 	"github.com/weeaa/jito-go/pkg"
+
+	"github.com/gagliardetto/solana-go"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 )
